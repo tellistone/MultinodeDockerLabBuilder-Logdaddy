@@ -40,3 +40,5 @@ Good to know:
 Logdaddy:
 
 Connect to the ubuntu-logdaddy container. Find the Logdaddy script located at /usr/share/logdaddy/logdaddy.sh
+
+This is configured to send logs to the cluster.
