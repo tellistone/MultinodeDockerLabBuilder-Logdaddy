@@ -1,0 +1,259 @@
+version: '3'
+
+#x-default-logs: &default-opts
+#  logging:
+#    options:
+#      max-size: "1m"
+
+#x-data-opts: &data
+#  ES_JAVA_OPTS: "-Xmx2g -Xms2g"
+#  discovery.seed_resolver.timeout: 60s
+#  discovery.seed_hosts: data1,data2
+#  cluster.initial_master_nodes: data1,data2
+#  cluster.name: "graylog"
+#  network.host: 0.0.0.0
+#  node.master: "true"
+#  node.data: "true"
+
+services:
+    ubuntu-logdaddy:
+      image: ubuntu:20.04
+      container_name: ubuntu-logdaddy
+      tty: true
+      stdin_open: true
+      volumes:
+        - ./scripts/logdaddy:/usr/share/logdaddy
+      deploy:
+        resources:
+          limits:
+            memory: 1g
+      networks:
+        - graylog.net
+      
+    # MongoDB: https://hub.docker.com/_/mongo/
+    mongo1:
+      image: mongo:$MONGO_VERSION
+      container_name: mongo1
+      command: mongod --replSet graylog --noauth --oplogSize 3 --bind_ip_all
+      environment:
+        - MONGO_BIND_IP=localhost,mongo2,mongo3
+      networks:
+        - graylog.net
+      volumes:
+        - ./storage/mongo/mongodb1:/data/db
+      deploy:
+        resources:
+          limits:
+            memory: 512m
+        placement:
+          constraints:
+            - node.labels.mongo.replica == 1
+    
+        # MongoDB: https://hub.docker.com/_/mongo/
+    mongo2:
+      image: mongo:$MONGO_VERSION
+      container_name: mongo2
+      command: mongod --replSet graylog --noauth --oplogSize 3 --bind_ip_all
+      networks:
+        - graylog.net
+      environment:
+        - MONGO_BIND_IP=localhost,mongo2,mongo3
+      volumes:
+        - ./storage/mongo/mongodb2:/data/db
+      deploy:
+        resources:
+          limits:
+            memory: 512m
+        placement:
+          constraints:
+            - node.labels.mongo.replica == 2
+    
+    mongo3:
+      image: mongo:$MONGO_VERSION
+      container_name: mongo3
+      command: mongod --replSet graylog --noauth --oplogSize 3 --bind_ip_all
+      networks:
+        - graylog.net
+      environment:
+        - MONGO_BIND_IP=localhost,mongo2,mongo3
+      volumes:
+        - ./storage/mongo/mongodb3:/data/db
+      deploy:
+        resources:
+          limits:
+            memory: 512m
+        placement:
+          constraints:
+            - node.labels.mongo.replica == 3
+
+    # Elasticsearch: https://www.elastic.co/guide/en/elasticsearch/reference/7.10/docker.html
+    elasticsearchdata1:
+      image: docker.elastic.co/elasticsearch/elasticsearch-oss:$ELASTIC_VERSION
+      container_name: elasticsearchdata1
+      environment:
+        - http.host=0.0.0.0
+        - transport.host=0.0.0.0
+        - network.host=0.0.0.0
+        - "ES_JAVA_OPTS=-Dlog4j2.formatMsgNoLookups=true -Xms1g -Xmx1g"
+        - node.max_local_storage_nodes=4
+        - cluster.name=graylog
+        - node.name=elasticsearchdata1
+        - cluster.initial_master_nodes=elasticsearchdata1,elasticsearchdata2
+        - discovery.seed_hosts=elasticsearchdata1,elasticsearchdata2
+        - action.auto_create_index=false
+      ulimits:
+        memlock:
+          soft: -1
+          hard: -1
+      deploy:
+        resources:
+          limits:
+            memory: 2g
+      networks:
+        - graylog.net
+      volumes:
+      - ./storage/elastic/elasticsearchdata1:/usr/share/elasticsearch/data
+
+    elasticsearchdata2:
+      image: docker.elastic.co/elasticsearch/elasticsearch-oss:$ELASTIC_VERSION
+      container_name: elasticsearchdata2
+      environment:
+        - http.host=0.0.0.0
+        - transport.host=0.0.0.0
+        - network.host=0.0.0.0
+        - "ES_JAVA_OPTS=-Dlog4j2.formatMsgNoLookups=true -Xms1g -Xmx1g"
+        - node.max_local_storage_nodes=4
+        - node.name=elasticsearchdata2
+        - cluster.name=graylog
+        - cluster.initial_master_nodes=elasticsearchdata1,elasticsearchdata2
+        - discovery.seed_hosts=elasticsearchdata1,elasticsearchdata2
+        - action.auto_create_index=false
+      ulimits:
+        memlock:
+          soft: -1
+          hard: -1
+      deploy:
+        resources:
+          limits:
+            memory: 2g
+      networks:
+        - graylog.net
+      depends_on:
+        - elasticsearchdata1
+      volumes:
+      - ./storage/elastic/elasticsearchdata2:/usr/share/elasticsearch/data
+
+    nginx:
+      image: nginx:alpine
+      container_name: nginx
+      hostname: nginx
+      mem_limit: 128m
+      restart: always
+      environment:
+        - TZ=Europe/Berlin
+      ports:
+        - 80:80
+        - 443:443
+        - 514:514
+        - 514:514/udp
+        - 1514:1514
+        - 1514:1514/udp
+        - 4739:4739
+        - 4739:4739/udp
+        - 5044:5044
+        - 5044:5044/udp
+        - 5555:5555
+        - 9515:9515
+        - 12201:12201
+        - 12201:12201/udp
+        - 13301:13301
+        - 13301:13301/udp
+      volumes:
+        - ./nginx/config/conf.d:/etc/nginx/conf.d:ro
+        - ./nginx/config/nginx.conf:/etc/nginx/nginx.conf:ro
+      depends_on:
+        - graylogmaster
+      networks:
+        - graylog.net
+
+
+    # Graylog Master: https://hub.docker.com/r/graylog/graylog/
+    graylogmaster:
+      image: graylog/graylog-enterprise:$GRAYLOG_VERSION
+      container_name: graylogmaster
+      environment:
+        # CHANGE ME (must be at least 16 characters)! Until changed, password: admin 
+        - GRAYLOG_PASSWORD_SECRET=somepasswordpepper
+        # One Graylog node only must be master.
+        - GRAYLOG_IS_MASTER=true
+        - GRAYLOG_ROOT_PASSWORD_SHA2=8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
+        - GRAYLOG_HTTP_EXTERNAL_URI=http://127.0.0.1/
+        - GRAYLOG_MONGODB_URI=mongodb://mongo1:27017,mongo2:27017,mongo3:27017/graylog?replicaSet=graylog
+        - GRAYLOG_ELASTICSEARCH_HOSTS=http://elasticsearchdata1:9200,http://elasticsearchdata2:9200
+        - GRAYLOG_SERVER_JAVA_OPTS=-Xms1g -Xmx1g -Dlog4j2.formatMsgNoLookups=true -Djdk.tls.acknowledgeCloseNotify=true -XX:+UnlockExperimentalVMOptions -XX:NewRatio=1 -XX:MaxMetaspaceSize=256m -server -XX:+ResizeTLAB -XX:-OmitStackTraceInFastThrow
+        - GRAYLOG_TRUSTED_PROXIES=10.10.10.0/24
+      entrypoint: /usr/bin/tini -- wait-for-it elasticsearch:9200 --  /docker-entrypoint.sh
+      networks:
+        - graylog.net
+      restart: always
+      deploy:
+        resources:
+          limits:
+            memory: 2g
+      depends_on:
+        - mongo1
+        - mongo2
+        - mongo3
+        - elasticsearchdata1
+        - elasticsearchdata2
+      #journal and config directories in local NFS share for persistence
+      volumes:
+        - graylogmaster_data:/usr/share/graylog/data
+
+    # Graylog Master: https://hub.docker.com/r/graylog/graylog/
+    graylog1:
+      image: graylog/graylog-enterprise:$GRAYLOG_VERSION
+      container_name: graylog1
+      environment:
+        # CHANGE ME (must be at least 16 characters)!
+        - GRAYLOG_PASSWORD_SECRET=somepasswordpepper
+        # Password: admin
+        - GRAYLOG_IS_MASTER=false
+        - GRAYLOG_ROOT_PASSWORD_SHA2=8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
+        - GRAYLOG_HTTP_EXTERNAL_URI=http://127.0.0.1/
+        - GRAYLOG_MONGODB_URI=mongodb://mongo1:27017,mongo2:27017,mongo3:27017/graylog?replicaSet=graylog
+        - GRAYLOG_ELASTICSEARCH_HOSTS=http://elasticsearchdata1:9200,http://elasticsearchdata2:9200
+        - GRAYLOG_SERVER_JAVA_OPTS=-Xms1g -Xmx1g -Dlog4j2.formatMsgNoLookups=true -Djdk.tls.acknowledgeCloseNotify=true -XX:+UnlockExperimentalVMOptions -XX:NewRatio=1 -XX:MaxMetaspaceSize=256m -server -XX:+ResizeTLAB -XX:-OmitStackTraceInFastThrow
+        - GRAYLOG_TRUSTED_PROXIES=10.10.10.0/24
+      entrypoint: /usr/bin/tini -- wait-for-it elasticsearch:9200 --  /docker-entrypoint.sh
+      networks:
+        - graylog.net
+      restart: always
+      deploy:
+        resources:
+          limits:
+            memory: 2g
+      depends_on:
+        - mongo1
+        - mongo2
+        - mongo3
+        - elasticsearchdata1
+        - elasticsearchdata2
+        - graylogmaster
+      #journal and config directories in local NFS share for persistence
+      volumes:
+        - graylog1_data:/usr/share/graylog/data
+
+networks:
+  graylog.net:
+    enable_ipv6: false
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.10.10.0/24
+
+volumes:
+  graylogmaster_data:
+    driver: local
+  graylog1_data:
+    driver: local
