@@ -43,11 +43,11 @@ Connect to the ubuntu-logdaddy container. Find the Logdaddy script located at /u
 
 This is all configured to send logs to the cluster.
 
-Load it with logs at the subdirectories of ./scripts/logdaddy/log
+Load it with logs via your mac, in the location you unzipped the script, in the subdirectory ./scripts/logdaddy/log/
 
-Launch it via ./logdaddy.sh
+Launch it via ./logdaddy.sh in the container.
 
-Parameters:
+Parameters to use when launching:
 
 -i 5     set the send-rate to that of a 5gb daily ingest cluster. Accepts all numbers, not just 5.
 -t 300   set the send-rate to neatly finish in 300 seconds. Accepts all numbers, not just 300.
