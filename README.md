@@ -50,7 +50,9 @@ Launch it via ./logdaddy.sh in the container.
 Parameters to use when launching:
 
 -i 5     set the send-rate to that of a 5gb daily ingest cluster. Accepts all numbers, not just 5.
+
 -t 300   set the send-rate to neatly finish in 300 seconds. Accepts all numbers, not just 300.
+
 -l 10    set the script to loop 10x. Accepts all numbers, not just 10. Set to 0 for infinite loop.
 
 
